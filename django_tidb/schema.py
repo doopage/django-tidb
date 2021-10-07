@@ -1,6 +1,7 @@
 from django.db.backends.mysql.schema import (
     DatabaseSchemaEditor as MysqlDatabaseSchemaEditor,
 )
+import re
 
 
 class DatabaseSchemaEditor(MysqlDatabaseSchemaEditor):
@@ -21,3 +22,15 @@ class DatabaseSchemaEditor(MysqlDatabaseSchemaEditor):
 
     def _field_should_be_indexed(self, model, field):
         return False
+
+    def execute(self, sql, params=()):
+        # TiDB does not support adding new column with UNIQUE,
+        # it will throw django.db.utils.OperationalError:
+        # (8200, "unsupported add column 'col' constraint UNIQUE KEY when altering 'table'").
+        # So split it into 2 sql, one adds a new column and the other add unique constraint
+        if re.match(r"ALTER TABLE .* ADD COLUMN .* UNIQUE.*", sql):
+            sql = re.sub(r'(^ALTER TABLE (.*) ADD COLUMN (.*?) .*) UNIQUE(.*)',
+                         r'\1; ALTER TABLE \2 ADD CONSTRAINT \3 UNIQUE (\3)',
+                         sql) # remove UNIQUE keyword
+
+        super().execute(sql, params)
